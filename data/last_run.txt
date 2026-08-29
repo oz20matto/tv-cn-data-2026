@@ -1,30 +1,27 @@
-01 [200] len=101104 :: TCL Q9M Pro specs/price :: 
-02 [200] len=100689 :: TCL Q9M Pro critics :: 
-03 [200] len=79495 :: TCL Q10L Pro :: 
-04 [200] len=100621 :: TCL X11L :: 
-05 [200] len=80549 :: Hisense E8Q Pro :: 
-06 [200] len=101768 :: Hisense E8Q Pro critics :: 
-07 [200] len=102465 :: FFALCON He7 Pro :: 
-08 [200] len=100415 :: He7 Pro critics :: 
-09 [200] len=102452 :: FFALCON Peng7 Pro :: 
-10 [200] len=99501 :: Redmi MAX 85 :: 
-11 [200] len=102438 :: Xiaomi S Pro Mini LED 85 :: 
-12 [200] len=101747 :: Xiaomi Master 86 :: 
-13 [200] len=102018 :: Sony X95L :: 
-14 [200] len=101184 :: Sony 2026 :: 
-15 [200] len=101687 :: Samsung QN90F :: 
-16 [200] len=99468 :: LG G5 85 :: 
-17 [200] len=79988 :: Hisense E7N Pro :: 
-18 [200] len=101517 :: E7N Pro critics :: 
-19 [200] len=99954 :: ZOL link Q9M Pro :: 
-20 [200] len=100782 :: ZOL link E8Q Pro :: 
-21 [200] len=100886 :: ZOL link He7 Pro :: 
-22 [200] len=101333 :: ZOL link Peng7 Pro :: 
-23 [200] len=101005 :: JD link Q9M Pro :: 
-24 [200] len=100078 :: JD link E8Q Pro :: 
-ISSUE #1 created
-COMMENT 2/5 -> 201
-COMMENT 3/5 -> 201
-COMMENT 4/5 -> 201
-COMMENT 5/5 -> 201
+01 Q9MPro-specs done
+02 E8QPro-specs done
+03 He7Pro-specs done
+04 Peng7Pro-specs done
+05 Q10LPro-specs done
+06 Xiaomi-Master-specs done
+07 Sony-X95L-specs done
+08 Samsung-QN90F-specs done
+09 LG-G5-specs done
+10 E7NPro-specs done
+11 RedmiMAX-85-specs done
+12 Q9MPro-critics done
+13 E8QPro-critics done
+14 He7Pro-critics done
+15 Peng7Pro-critics done
+16 E7NPro-critics done
+17 ZOL-Q9MPro done
+18 ZOL-E8QPro done
+19 ZOL-He7Pro done
+20 ZOL-Peng7Pro done
+21 JD-Q9MPro done
+22 JD-E8QPro done
+23 JD-He7Pro done
+24 2026-news done
+issue #2 ok
+chunk 2/2 -> 201
 DONE
