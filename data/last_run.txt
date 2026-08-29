@@ -1,25 +1,30 @@
-[404] len=73 https://detail.zol.com.cn/tv/adv_search.html :: 
-[404] len=73 https://detail.zol.com.cn/tv/tcl/Q9M_Pro.html :: 
-[404] len=73 https://detail.zol.com.cn/tv/tcl/Q10L_Pro.html :: 
-[404] len=73 https://detail.zol.com.cn/tv/hisense/E8Q_Pro.html :: 
-[404] len=73 https://detail.zol.com.cn/tv/ffalcon/He7_Pro.html :: 
-[404] len=73 https://detail.zol.com.cn/tv/ffalcon/Peng7_Pro.html :: 
-[200] len=101123 https://www.bing.com/search?q=TCL+Q9M+Pro+85英寸+分区+峰值亮度+价格&setmkt=zh-CN :: 
-[200] len=15219 https://cn.bing.com/search?q=海信+E8Q+Pro+85英寸+参数+评测+缺点&setmkt=zh-CN :: 
-[200] len=15204 https://cn.bing.com/search?q=雷鸟+鹤7+Pro+85英寸+分区+亮度+价格&setmkt=zh-CN :: 
-[200] len=15194 https://cn.bing.com/search?q=雷鸟+鹏7+Pro+85英寸+参数+价格&setmkt=zh-CN :: 
-[200] len=15020 https://cn.bing.com/search?q=小米+电视+大师+Mini+LED+85英寸+参数+价格&setmkt=zh-CN :: 
-[200] len=15177 https://cn.bing.com/search?q=索尼+X95L+85英寸+参数+价格+缺点&setmkt=zh-CN :: 
-[200] len=14896 https://cn.bing.com/search?q=三星+QN90F+85英寸+参数+价格&setmkt=zh-CN :: 
-[200] len=15251 https://cn.bing.com/search?q=TCL+X11L+85英寸+参数+价格&setmkt=zh-CN :: 
-[200] len=15090 https://cn.bing.com/search?q=Redmi+MAX+85+参数+价格+2025&setmkt=zh-CN :: 
-[200] len=15148 https://cn.bing.com/search?q=海信+E7N+Pro+85英寸+参数+价格&setmkt=zh-CN :: 
-DONE ok=10/16
-EXITCODE=0
-RUNTIME_UTC=2026-08-29T16:53:19Z
-RUNNER=Linux
-total 264
-drwxr-xr-x 2 runner runner   4096 Aug 29 16:53 .
-drwxr-xr-x 5 runner runner   4096 Aug 29 16:52 ..
--rw-r--r-- 1 runner runner 256443 Aug 29 16:53 fetch_log.json
--rw-r--r-- 1 runner runner   1496 Aug 29 16:53 last_run.txt
+01 [200] len=101104 :: TCL Q9M Pro specs/price :: 
+02 [200] len=100689 :: TCL Q9M Pro critics :: 
+03 [200] len=79495 :: TCL Q10L Pro :: 
+04 [200] len=100621 :: TCL X11L :: 
+05 [200] len=80549 :: Hisense E8Q Pro :: 
+06 [200] len=101768 :: Hisense E8Q Pro critics :: 
+07 [200] len=102465 :: FFALCON He7 Pro :: 
+08 [200] len=100415 :: He7 Pro critics :: 
+09 [200] len=102452 :: FFALCON Peng7 Pro :: 
+10 [200] len=99501 :: Redmi MAX 85 :: 
+11 [200] len=102438 :: Xiaomi S Pro Mini LED 85 :: 
+12 [200] len=101747 :: Xiaomi Master 86 :: 
+13 [200] len=102018 :: Sony X95L :: 
+14 [200] len=101184 :: Sony 2026 :: 
+15 [200] len=101687 :: Samsung QN90F :: 
+16 [200] len=99468 :: LG G5 85 :: 
+17 [200] len=79988 :: Hisense E7N Pro :: 
+18 [200] len=101517 :: E7N Pro critics :: 
+19 [200] len=99954 :: ZOL link Q9M Pro :: 
+20 [200] len=100782 :: ZOL link E8Q Pro :: 
+21 [200] len=100886 :: ZOL link He7 Pro :: 
+22 [200] len=101333 :: ZOL link Peng7 Pro :: 
+23 [200] len=101005 :: JD link Q9M Pro :: 
+24 [200] len=100078 :: JD link E8Q Pro :: 
+ISSUE #1 created
+COMMENT 2/5 -> 201
+COMMENT 3/5 -> 201
+COMMENT 4/5 -> 201
+COMMENT 5/5 -> 201
+DONE
