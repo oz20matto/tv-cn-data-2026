@@ -22,5 +22,6 @@
 22 JD-Q9MPro-85 done
 23 JD-E8QPro-85 done
 24 JD-He7Pro-85 done
-issue #4 ok
+issue #5 ok
+chunk 2/2 -> 201
 DONE
