@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""v4: structured Bing SERP parser + real-URL resolution + direct page crawl mode.
-results -> GitHub issue comments (readable) + data/ backup files.
+"""v5: DDG-html SERP parser (with Bing-zhCN fallback) + page mode.
+results -> GitHub issue comments.
 """
 import base64
 import html as htmllib
@@ -9,6 +9,7 @@ import json
 import os
 import re
 import time
+import urllib.parse
 
 import requests
 
@@ -32,8 +33,7 @@ def http_get(url):
 
 def clean_text(s):
     s = htmllib.unescape(s)
-    s = re.sub(r"\s+", " ", s)
-    return s.strip()
+    return re.sub(r"\s+", " ", s).strip()
 
 
 def strip_html(h):
@@ -46,7 +46,35 @@ def strip_html(h):
     return h.strip()
 
 
-def parse_serp(body, note):
+def decode_ddg(href):
+    if href.startswith("//"):
+        href = "https:" + href
+    if "uddg=" in href:
+        m = re.search(r"uddg=([^&]+)", href)
+        if m:
+            try:
+                return urllib.parse.unquote(m.group(1))
+            except Exception:
+                pass
+    if href.startswith("http") and "duckduckgo.com" not in href:
+        return href
+    return ""
+
+
+def parse_ddg(body):
+    out = []
+    for m in re.finditer(r'<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', body, re.S):
+        href, title = m.group(1), clean_text(re.sub(r"<[^>]+>", " ", m.group(2)))
+        url = decode_ddg(href)
+        out.append([title, url, ""])
+    snips = re.findall(r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>', body, re.S)
+    for i, s in enumerate(snips):
+        if i < len(out):
+            out[i][2] = clean_text(re.sub(r"<[^>]+>", " ", s))[:300]
+    return out[:8]
+
+
+def parse_bing(body):
     out = []
     blocks = re.split(r'class="b_algo"', body)[1:]
     for b in blocks[:8]:
@@ -54,12 +82,11 @@ def parse_serp(body, note):
         title = clean_text(re.sub(r"<[^>]+>", " ", m_t.group(1))) if m_t else ""
         m_u = re.search(r'href="(https?://[^"]+)"', b)
         url = m_u.group(1) if m_u else ""
-        if "bing.com/ck/a" in url or "u=a1" in url:
+        if "u=a1" in url:
             m2 = re.search(r"u=a1([A-Za-z0-9+/=_-]+)", url)
             if m2:
                 try:
-                    pad = m2.group(1) + "=" * (-len(m2.group(1)) % 4)
-                    dec = base64.b64decode(pad).decode("utf-8", "ignore")
+                    dec = base64.b64decode(m2.group(1) + "=" * (-len(m2.group(1)) % 4)).decode("utf-8", "ignore")
                     if dec.startswith("http"):
                         url = dec
                 except Exception:
@@ -67,45 +94,45 @@ def parse_serp(body, note):
         m_s = re.search(r"<p[^>]*>(.*?)</p>", b, re.S)
         snip = clean_text(re.sub(r"<[^>]+>", " ", m_s.group(1)))[:280] if m_s else ""
         if title or url:
-            out.append((title, url, snip))
+            out.append([title, url, snip])
     return out
 
 
-def decode_redirects(body):
-    urls = []
-    for m in re.finditer(r"u=a1([A-Za-z0-9+/=_-]{10,})", body):
-        try:
-            pad = m.group(1) + "=" * (-len(m.group(1)) % 4)
-            dec = base64.b64decode(pad).decode("utf-8", "ignore")
-            if dec.startswith("http") and "bing.com" not in dec:
-                urls.append(dec)
-        except Exception:
-            pass
-    seen, res = set(), []
-    for u in urls:
-        if u not in seen:
-            seen.add(u)
-            res.append(u)
-    return res
-
-
-def do_serp(note, seed_url):
-    r = http_get(seed_url)
-    if r.status_code != 200:
-        return f"===== SERP {note} =====\nHTTP {r.status_code}\n"
-    results = parse_serp(r.text, note)
-    links = decode_redirects(r.text)
+def do_serp(note, ddg_query):
     lines = [f"===== SERP {note} ====="]
-    for i, (t, u, s) in enumerate(results, 1):
-        lines.append(f"[{i}] {t}\n    URL {u}\n    SNIP {s}")
-    lines.append("REDIRECT-DECODED: " + " | ".join(links[:12]))
+    # 1) DDG
+    try:
+        r = requests.get("https://html.duckduckgo.com/html/",
+                         params={"q": ddg_query, "kl": "cn-zh"},
+                         headers={"User-Agent": UA}, timeout=25)
+        if r.status_code == 200 and "result__a" in r.text:
+            res = parse_ddg(r.text)
+            if res:
+                lines.append(f"SRC duckduckgo ({len(res)} res)")
+                for i, (t, u, s) in enumerate(res, 1):
+                    lines.append(f"[{i}] {t}\n    URL {u}\n    SNIP {s}")
+                return "\n".join(lines) + "\n"
+        lines.append(f"ddg skip status={r.status_code}")
+    except Exception as e:
+        lines.append(f"ddg err {type(e).__name__}: {e}")
+    # 2) Bing zh-CN fallback
+    try:
+        burl = "https://cn.bing.com/search?q=" + urllib.parse.quote(ddg_query) + "&mkt=zh-CN&setlang=zh-hans&cc=CN"
+        r2 = http_get(burl)
+        if r2.status_code == 200:
+            res = parse_bing(r2.text)
+            lines.append(f"SRC bing-zh ({len(res)} res)")
+            for i, (t, u, s) in enumerate(res, 1):
+                lines.append(f"[{i}] {t}\n    URL {u}\n    SNIP {s}")
+    except Exception as e:
+        lines.append(f"bing err {type(e).__name__}: {e}")
     return "\n".join(lines) + "\n"
 
 
-def do_page(note, seed_url, keep=12000):
-    lines = [f"===== PAGE {note} =====", f"SRC {seed_url}"]
+def do_page(note, url, keep=12000):
+    lines = [f"===== PAGE {note} =====", f"SRC {url}"]
     try:
-        r = http_get(seed_url)
+        r = http_get(url)
         lines.append(f"HTTP {r.status_code} len={len(r.content)} final={r.url}")
         if r.status_code == 200:
             txt = strip_html(r.text)
@@ -141,7 +168,7 @@ def main():
     token = os.environ.get("GITHUB_TOKEN", "")
     with open("targets.json", encoding="utf-8") as f:
         targets = json.load(f)
-    parts, summary = [], []
+    parts = []
     for i, t in enumerate(targets, 1):
         note, url, mode = t["note"], t["url"], t.get("mode", "serp")
         try:
@@ -152,15 +179,14 @@ def main():
         except Exception as e:
             part = f"===== {note} =====\nERR {type(e).__name__}: {e}\n"
         parts.append(part)
-        summary.append(f"{i:02d} {note} ok={part.count('HTTP 200') + part.count('=====') > 1}")
         print(f"{i:02d} {note} done", flush=True)
-        time.sleep(0.8)
+        time.sleep(1.0)
     full = "\n".join(parts)
     os.makedirs("data", exist_ok=True)
     with open("data/digest.txt", "w", encoding="utf-8") as f:
         f.write(full)
     if token:
-        publish(token, full, f"digest run {time.strftime('%m-%d %H:%M UTC', time.gmtime())}")
+        publish(token, full, f"digest v5 {time.strftime('%m-%d %H:%M UTC', time.gmtime())}")
     print("DONE", flush=True)
 
 
