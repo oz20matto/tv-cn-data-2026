@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""v5b: DDG-html SERP parser (with Bing-zhCN fallback) + page mode.
-targets.json: {"note": ..., "query": "chinese query", "mode": "serp|page", "url": ..., "keep": ...}
+"""v6: multi-engine SERP (Bing RSS -> Baidu -> Sogou -> Bing html) + page mode.
+targets.json: {"note", "query", "mode": "serp|page", "url", "keep"}
 """
 import base64
 import html as htmllib
@@ -18,14 +18,15 @@ REPO = "oz20matto/tv-cn-data-2026"
 API = "https://api.github.com"
 CHUNK = 46000
 
+SESSION = requests.Session()
+SESSION.headers.update({
+    "User-Agent": UA,
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+})
+
 
 def http_get(url):
-    headers = {
-        "User-Agent": UA,
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
-    }
-    r = requests.get(url, headers=headers, timeout=25, allow_redirects=True)
+    r = SESSION.get(url, timeout=25, allow_redirects=True)
     enc = r.encoding if (r.encoding and r.encoding.lower() not in ("iso-8859-1", "ascii")) else r.apparent_encoding
     r.encoding = enc or "utf-8"
     return r
@@ -46,37 +47,79 @@ def strip_html(h):
     return h.strip()
 
 
-def decode_ddg(href):
-    if href.startswith("//"):
-        href = "https:" + href
-    if "uddg=" in href:
-        m = re.search(r"uddg=([^&]+)", href)
-        if m:
-            try:
-                return urllib.parse.unquote(m.group(1))
-            except Exception:
-                pass
-    if href.startswith("http") and "duckduckgo.com" not in href:
-        return href
-    return ""
+def engine_bing_rss(query):
+    url = "https://www.bing.com/search?format=rss&count=10&q=" + urllib.parse.quote(query) + "&mkt=zh-CN&setlang=zh-hans"
+    r = http_get(url)
+    if r.status_code != 200 or "<item" not in r.text:
+        return None, f"status={r.status_code}"
+    items = []
+    for m in re.finditer(r"<item>(.*?)</item>", r.text, re.S):
+        blk = m.group(1)
+        t = re.search(r"<title>(.*?)</title>", blk, re.S)
+        l = re.search(r"<link>(.*?)</link>", blk, re.S)
+        d = re.search(r"<description>(.*?)</description>", blk, re.S)
+        title = clean_text(t.group(1)) if t else ""
+        link = clean_text(l.group(1)) if l else ""
+        desc = clean_text(d.group(1))[:300] if d else ""
+        if "u=a1" in link and "bing.com/ck" in link:
+            m2 = re.search(r"u=a1([A-Za-z0-9+/=_-]+)", link)
+            if m2:
+                try:
+                    dec = base64.b64decode(m2.group(1) + "=" * (-len(m2.group(1)) % 4)).decode("utf-8", "ignore")
+                    if dec.startswith("http"):
+                        link = dec
+                except Exception:
+                    pass
+        if title:
+            items.append([title, link, desc])
+    return items[:8], f"status={r.status_code}"
 
 
-def parse_ddg(body):
-    out = []
-    for m in re.finditer(r'<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', body, re.S):
-        href, title = m.group(1), clean_text(re.sub(r"<[^>]+>", " ", m.group(2)))
-        url = decode_ddg(href)
-        out.append([title, url, ""])
-    snips = re.findall(r'class="result__snippet"[^>]*>(.*?)</a>', body, re.S)
-    for i, s in enumerate(snips):
-        if i < len(out):
-            out[i][2] = clean_text(re.sub(r"<[^>]+>", " ", s))[:320]
-    return out[:8]
+def engine_baidu(query):
+    try:
+        http_get("https://www.baidu.com/")
+    except Exception:
+        pass
+    r = http_get("https://www.baidu.com/s?wd=" + urllib.parse.quote(query) + "&rn=10")
+    if r.status_code != 200 or "c-container" not in r.text:
+        return None, f"status={r.status_code} len={len(r.text)}"
+    items = []
+    blocks = re.split(r'class="result c-container', r.text)[1:]
+    for b in blocks[:10]:
+        m = re.search(r"<h3[^>]*>\s*<a[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>", b, re.S)
+        if not m:
+            continue
+        href = m.group(1)
+        if href.startswith("/"):
+            href = "https://www.baidu.com" + href
+        title = clean_text(re.sub(r"<[^>]+>", " ", m.group(2)))
+        snip = strip_html(b)[:280]
+        items.append([title, href, snip])
+    return items, f"status={r.status_code}"
 
 
-def parse_bing(body):
-    out = []
-    blocks = re.split(r'class="b_algo"', body)[1:]
+def engine_sogou(query):
+    r = http_get("https://www.sogou.com/web?query=" + urllib.parse.quote(query))
+    if r.status_code != 200:  
+        return None, f"status={r.status_code}"
+    items = []
+    for m in re.finditer(r'<h3[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>', r.text, re.S):
+        href = m.group(1)
+        if href.startswith("/"):
+            href = "https://www.sogou.com" + href
+        title = clean_text(re.sub(r"<[^>]+>", " ", m.group(2)))
+        items.append([title, href, ""])
+        if len(items) >= 8:
+            break
+    return (items or None), f"status={r.status_code}"
+
+
+def engine_bing_html(query):
+    r = http_get("https://www.bing.com/search?q=" + urllib.parse.quote(query) + "&mkt=zh-CN&setlang=zh-hans&count=10")
+    if r.status_code != 200:
+        return None, f"status={r.status_code}"
+    items = []
+    blocks = re.split(r'class="b_algo"', r.text)[1:]
     for b in blocks[:8]:
         m_t = re.search(r"<h2[^>]*>(.*?)</h2>", b, re.S)
         title = clean_text(re.sub(r"<[^>]+>", " ", m_t.group(1))) if m_t else ""
@@ -91,41 +134,30 @@ def parse_bing(body):
                         url = dec
                 except Exception:
                     pass
-        m_s = re.search(r"<p[^>]*>(.*?)</p>", b, re.S)
-        snip = clean_text(re.sub(r"<[^>]+>", " ", m_s.group(1)))[:280] if m_s else ""
-        if title or url:
-            out.append([title, url, snip])
-    return out
+        items.append([title, url, ""])
+    return (items or None), f"status={r.status_code} len={len(r.text)}"
 
 
 def do_serp(note, query):
     lines = [f"===== SERP {note} =====", f"QUERY {query}"]
-    # 1) DDG html
-    try:
-        r = requests.get("https://html.duckduckgo.com/html/",
-                         params={"q": query},
-                         headers={"User-Agent": UA}, timeout=25)
-        if r.status_code == 200 and "result__a" in r.text:
-            res = parse_ddg(r.text)
-            if res:
-                lines.append(f"SRC duckduckgo ({len(res)} res)")
-                for i, (t, u, s) in enumerate(res, 1):
+    for name, fn in [("bing-rss", engine_bing_rss), ("baidu", engine_baidu), ("sogou", engine_sogou), ("bing-html", engine_bing_html)]:
+        try:
+            items, info = fn(query)
+            if items:
+                lines.append(f"SRC {name} ({len(items)} res, {info})")
+                for i, (t, u, s) in enumerate(items, 1):
                     lines.append(f"[{i}] {t}\n    URL {u}\n    SNIP {s}")
                 return "\n".join(lines) + "\n"
-        lines.append(f"ddg skip status={r.status_code}")
-    except Exception as e:
-        lines.append(f"ddg err {type(e).__name__}: {e}")
-    # 2) Bing zh-CN fallback
+            lines.append(f"{name}: empty ({info})")
+        except Exception as e:
+            lines.append(f"{name} err {type(e).__name__}: {e}")
+    # fallback: bing html cleaned text for manual reading
     try:
-        burl = "https://cn.bing.com/search?q=" + urllib.parse.quote(query) + "&mkt=zh-CN&setlang=zh-hans&cc=CN"
-        r2 = http_get(burl)
-        if r2.status_code == 200:
-            res = parse_bing(r2.text)
-            lines.append(f"SRC bing-zh ({len(res)} res)")
-            for i, (t, u, s) in enumerate(res, 1):
-                lines.append(f"[{i}] {t}\n    URL {u}\n    SNIP {s}")
+        r = http_get("https://www.bing.com/search?q=" + urllib.parse.quote(query) + "&mkt=zh-CN&count=10")
+        lines.append(f"FALLBACK-TEXT bing status={r.status_code}")
+        lines.append(strip_html(r.text)[:5000])
     except Exception as e:
-        lines.append(f"bing err {type(e).__name__}: {e}")
+        lines.append(f"fallback err {e}")
     return "\n".join(lines) + "\n"
 
 
@@ -186,7 +218,7 @@ def main():
     with open("data/digest.txt", "w", encoding="utf-8") as f:
         f.write(full)
     if token:
-        publish(token, full, f"digest v5b {time.strftime('%m-%d %H:%M UTC', time.gmtime())}")
+        publish(token, full, f"digest v6 {time.strftime('%m-%d %H:%M UTC', time.gmtime())}")
     print("DONE", flush=True)
 
 
