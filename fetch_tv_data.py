@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""v5: DDG-html SERP parser (with Bing-zhCN fallback) + page mode.
-results -> GitHub issue comments.
+"""v5b: DDG-html SERP parser (with Bing-zhCN fallback) + page mode.
+targets.json: {"note": ..., "query": "chinese query", "mode": "serp|page", "url": ..., "keep": ...}
 """
 import base64
 import html as htmllib
@@ -67,10 +67,10 @@ def parse_ddg(body):
         href, title = m.group(1), clean_text(re.sub(r"<[^>]+>", " ", m.group(2)))
         url = decode_ddg(href)
         out.append([title, url, ""])
-    snips = re.findall(r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>', body, re.S)
+    snips = re.findall(r'class="result__snippet"[^>]*>(.*?)</a>', body, re.S)
     for i, s in enumerate(snips):
         if i < len(out):
-            out[i][2] = clean_text(re.sub(r"<[^>]+>", " ", s))[:300]
+            out[i][2] = clean_text(re.sub(r"<[^>]+>", " ", s))[:320]
     return out[:8]
 
 
@@ -98,12 +98,12 @@ def parse_bing(body):
     return out
 
 
-def do_serp(note, ddg_query):
-    lines = [f"===== SERP {note} ====="]
-    # 1) DDG
+def do_serp(note, query):
+    lines = [f"===== SERP {note} =====", f"QUERY {query}"]
+    # 1) DDG html
     try:
         r = requests.get("https://html.duckduckgo.com/html/",
-                         params={"q": ddg_query, "kl": "cn-zh"},
+                         params={"q": query},
                          headers={"User-Agent": UA}, timeout=25)
         if r.status_code == 200 and "result__a" in r.text:
             res = parse_ddg(r.text)
@@ -117,7 +117,7 @@ def do_serp(note, ddg_query):
         lines.append(f"ddg err {type(e).__name__}: {e}")
     # 2) Bing zh-CN fallback
     try:
-        burl = "https://cn.bing.com/search?q=" + urllib.parse.quote(ddg_query) + "&mkt=zh-CN&setlang=zh-hans&cc=CN"
+        burl = "https://cn.bing.com/search?q=" + urllib.parse.quote(query) + "&mkt=zh-CN&setlang=zh-hans&cc=CN"
         r2 = http_get(burl)
         if r2.status_code == 200:
             res = parse_bing(r2.text)
@@ -170,12 +170,12 @@ def main():
         targets = json.load(f)
     parts = []
     for i, t in enumerate(targets, 1):
-        note, url, mode = t["note"], t["url"], t.get("mode", "serp")
+        note, mode = t["note"], t.get("mode", "serp")
         try:
             if mode == "page":
-                part = do_page(note, url, keep=t.get("keep", 12000))
+                part = do_page(note, t["url"], keep=t.get("keep", 12000))
             else:
-                part = do_serp(note, url)
+                part = do_serp(note, t["query"])
         except Exception as e:
             part = f"===== {note} =====\nERR {type(e).__name__}: {e}\n"
         parts.append(part)
@@ -186,7 +186,7 @@ def main():
     with open("data/digest.txt", "w", encoding="utf-8") as f:
         f.write(full)
     if token:
-        publish(token, full, f"digest v5 {time.strftime('%m-%d %H:%M UTC', time.gmtime())}")
+        publish(token, full, f"digest v5b {time.strftime('%m-%d %H:%M UTC', time.gmtime())}")
     print("DONE", flush=True)
 
 
