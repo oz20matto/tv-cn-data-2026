@@ -6,16 +6,17 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   fetch:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -25,20 +26,16 @@ jobs:
       - name: Install deps
         run: python -m pip install --no-input requests || true
 
-      - name: Fetch data
+      - name: Fetch + publish
         run: |
           set +e
-          mkdir -p data/
+          mkdir -p data/pages
           python -u fetch_tv_data.py 2>&1 | tee data/last_run.txt
-          echo "EXITCODE=$?" >> data/last_run.txt
-          echo "RUNTIME_UTC=$(date -u +%FT%TZ)" >> data/last_run.txt
-          echo "RUNNER=$RUNNER_OS" >> data/last_run.txt
-          ls -la data/ >> data/last_run.txt
 
-      - name: Commit results
+      - name: Commit backup files
         run: |
           git config user.name "fetch-bot"
           git config user.email "bot@github.local"
           git add -A data/ || true
-          git commit -m "data: results $(date -u +%FT%TZ)" || echo "nothing to commit"
+          git commit -m "data: backup $(date -u +%FT%TZ)" || echo "nothing to commit"
           git push || echo "push failed"
