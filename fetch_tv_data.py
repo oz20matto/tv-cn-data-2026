@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""v6: multi-engine SERP (Bing RSS -> Baidu -> Sogou -> Bing html) + page mode.
-targets.json: {"note", "query", "mode": "serp|page", "url", "keep"}
+"""v7: Baidu-first + token validation + ZOL direct search w/ auto product page fetch.
+modes: serp (baidu->so360->sogou->bingrss, validated), zolauto (zol search + fetch top product pages), page.
 """
 import base64
 import html as htmllib
@@ -19,10 +19,7 @@ API = "https://api.github.com"
 CHUNK = 46000
 
 SESSION = requests.Session()
-SESSION.headers.update({
-    "User-Agent": UA,
-    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-})
+SESSION.headers.update({"User-Agent": UA, "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"})
 
 
 def http_get(url):
@@ -38,17 +35,81 @@ def clean_text(s):
 
 
 def strip_html(h):
-    h = re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\1>", " ", h)
+    h = re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\\1>", " ", h)
     h = re.sub(r"<!--.*?-->", " ", h, flags=re.S)
     h = re.sub(r"(?s)<[^>]+>", "\n", h)
     h = htmllib.unescape(h)
-    h = re.sub(r"[ \t\x0b\f\r]+", " ", h)
-    h = re.sub(r"\n\s*\n+", "\n", h)
+    h = re.sub(r"[ \\t\\x0b\\f\\r]+", " ", h)
+    h = re.sub(r"\\n\\s*\\n+", "\\n", h)
     return h.strip()
 
 
-def engine_bing_rss(query):
-    url = "https://www.bing.com/search?format=rss&count=10&q=" + urllib.parse.quote(query) + "&mkt=zh-CN&setlang=zh-hans"
+def token_ok(items, tokens):
+    if not tokens:
+        return True
+    blob = " ".join((t or "") + " " + (u or "") + " " + (s or "") for t, u, s in items).lower()
+    return any(tok.lower() in blob for tok in tokens)
+
+
+def engine_baidu(query):
+    try:
+        http_get("https://www.baidu.com/")
+    except Exception:
+        pass
+    r = http_get("https://www.baidu.com/s?wd=" + urllib.parse.quote(query) + "&rn=10")
+    if r.status_code != 200:
+        return None, f"status={r.status_code} len={len(r.text)}" if False else f"status={r.status_code}"
+    if "百度安全验证" in r.text:
+        return None, "BAIDU-CAPTCHA"
+    items = []
+    blocks = re.split(r'class="result c-container', r.text)[1:]
+    for b in blocks[:10]:
+        m = re.search(r'<h3[^>]*>\\s*<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>', b, re.S)
+        if not m:
+            continue
+        href = m.group(1)
+        if href.startswith("/"):
+            href = "https://www.baidu.com" + href
+        title = clean_text(re.sub(r"<[^>]+>", " ", m.group(2)))
+        snip = clean_text(strip_html(b))[:280]
+        items.append([title, href, snip])
+    return (items or None), f"status={r.status_code} blocks={len(blocks)}"
+
+
+def engine_so360(query):
+    r = http_get("https://www.so.com/s?q=" + urllib.parse.quote(query) + "&pn=1")
+    if r.status_code != 200:
+        return None, f"status={r.status_code}"
+    items = []
+    for m in re.finditer(r'<h3[^>]*>\\s*<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>', r.text, re.S):
+        href = m.group(1)
+        if href.startswith("/"):
+            href = "https://www.so.com" + href
+        title = clean_text(re.sub(r"<[^>]+>", " ", m.group(2)))
+        items.append([title, href, ""])
+        if len(items) >= 8:
+            break
+    return (items or None), f"status={r.status_code}"
+
+
+def engine_sogou(query):
+    r = http_get("https://www.sogou.com/web?query=" + urllib.parse.quote(query))
+    if r.status_code != 200:
+        return None, f"status={r.status_code}"
+    items = []
+    for m in re.finditer(r'<h3[^>]*>\\s*<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>', r.text, re.S):
+        href = m.group(1)
+        if href.startswith("/"):
+            href = "https://www.sogou.com" + href
+        title = clean_text(re.sub(r"<[^>]+>", " ", m.group(2)))
+        items.append([title, href, ""])
+        if len(items) >= 8:
+            break
+    return (items or None), f"status={r.status_code}"
+
+
+def engine_bingrss(query):
+    url = "https://www.bing.com/search?format=rss&count=8&q=" + urllib.parse.quote(query)
     r = http_get(url)
     if r.status_code != 200 or "<item" not in r.text:
         return None, f"status={r.status_code}"
@@ -60,8 +121,8 @@ def engine_bing_rss(query):
         d = re.search(r"<description>(.*?)</description>", blk, re.S)
         title = clean_text(t.group(1)) if t else ""
         link = clean_text(l.group(1)) if l else ""
-        desc = clean_text(d.group(1))[:300] if d else ""
-        if "u=a1" in link and "bing.com/ck" in link:
+        desc = clean_text(d.group(1))[:250] if d else ""
+        if "u=a1" in link:
             m2 = re.search(r"u=a1([A-Za-z0-9+/=_-]+)", link)
             if m2:
                 try:
@@ -72,93 +133,60 @@ def engine_bing_rss(query):
                     pass
         if title:
             items.append([title, link, desc])
-    return items[:8], f"status={r.status_code}"
+    return (items[:8] or None), f"status={r.status_code}"
 
 
-def engine_baidu(query):
-    try:
-        http_get("https://www.baidu.com/")
-    except Exception:
-        pass
-    r = http_get("https://www.baidu.com/s?wd=" + urllib.parse.quote(query) + "&rn=10")
-    if r.status_code != 200 or "c-container" not in r.text:
-        return None, f"status={r.status_code} len={len(r.text)}"
-    items = []
-    blocks = re.split(r'class="result c-container', r.text)[1:]
-    for b in blocks[:10]:
-        m = re.search(r"<h3[^>]*>\s*<a[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>", b, re.S)
-        if not m:
-            continue
-        href = m.group(1)
-        if href.startswith("/"):
-            href = "https://www.baidu.com" + href
-        title = clean_text(re.sub(r"<[^>]+>", " ", m.group(2)))
-        snip = strip_html(b)[:280]
-        items.append([title, href, snip])
-    return items, f"status={r.status_code}"
-
-
-def engine_sogou(query):
-    r = http_get("https://www.sogou.com/web?query=" + urllib.parse.quote(query))
-    if r.status_code != 200:  
-        return None, f"status={r.status_code}"
-    items = []
-    for m in re.finditer(r'<h3[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>', r.text, re.S):
-        href = m.group(1)
-        if href.startswith("/"):
-            href = "https://www.sogou.com" + href
-        title = clean_text(re.sub(r"<[^>]+>", " ", m.group(2)))
-        items.append([title, href, ""])
-        if len(items) >= 8:
-            break
-    return (items or None), f"status={r.status_code}"
-
-
-def engine_bing_html(query):
-    r = http_get("https://www.bing.com/search?q=" + urllib.parse.quote(query) + "&mkt=zh-CN&setlang=zh-hans&count=10")
-    if r.status_code != 200:
-        return None, f"status={r.status_code}"
-    items = []
-    blocks = re.split(r'class="b_algo"', r.text)[1:]
-    for b in blocks[:8]:
-        m_t = re.search(r"<h2[^>]*>(.*?)</h2>", b, re.S)
-        title = clean_text(re.sub(r"<[^>]+>", " ", m_t.group(1))) if m_t else ""
-        m_u = re.search(r'href="(https?://[^"]+)"', b)
-        url = m_u.group(1) if m_u else ""
-        if "u=a1" in url:
-            m2 = re.search(r"u=a1([A-Za-z0-9+/=_-]+)", url)
-            if m2:
-                try:
-                    dec = base64.b64decode(m2.group(1) + "=" * (-len(m2.group(1)) % 4)).decode("utf-8", "ignore")
-                    if dec.startswith("http"):
-                        url = dec
-                except Exception:
-                    pass
-        items.append([title, url, ""])
-    return (items or None), f"status={r.status_code} len={len(r.text)}"
-
-
-def do_serp(note, query):
+def do_serp(note, query, tokens):
     lines = [f"===== SERP {note} =====", f"QUERY {query}"]
-    for name, fn in [("bing-rss", engine_bing_rss), ("baidu", engine_baidu), ("sogou", engine_sogou), ("bing-html", engine_bing_html)]:
+    for name, fn in [("baidu", engine_baidu), ("so360", engine_so360), ("sogou", engine_sogou), ("bingrss", engine_bingrss)]:
         try:
             items, info = fn(query)
-            if items:
+            if items and token_ok(items, tokens):
                 lines.append(f"SRC {name} ({len(items)} res, {info})")
                 for i, (t, u, s) in enumerate(items, 1):
-                    lines.append(f"[{i}] {t}\n    URL {u}\n    SNIP {s}")
-                return "\n".join(lines) + "\n"
-            lines.append(f"{name}: empty ({info})")
+                    lines.append(f"[{i}] {t}\\n    URL {u}\\n    SNIP {s}")
+                return "\\n".join(lines) + "\\n"
+            lines.append(f"{name}: {'empty' if not items else 'TOKEN-MISS'} ({info})")
         except Exception as e:
             lines.append(f"{name} err {type(e).__name__}: {e}")
-    # fallback: bing html cleaned text for manual reading
+        time.sleep(0.5)
+    return "\\n".join(lines) + "\\n"
+
+
+def do_zolauto(note, keyword, tokens, npages=2, keep=9000):
+    lines = [f"===== ZOLAUTO {note} =====", f"KEYWORD {keyword}"]
+    search_url = "https://detail.zol.com.cn/index.php?c=SearchList&keyword=" + urllib.parse.quote(keyword)
     try:
-        r = http_get("https://www.bing.com/search?q=" + urllib.parse.quote(query) + "&mkt=zh-CN&count=10")
-        lines.append(f"FALLBACK-TEXT bing status={r.status_code}")
-        lines.append(strip_html(r.text)[:5000])
+        r = http_get(search_url)
+        lines.append(f"SEARCH http={r.status_code} len={len(r.content)}")
+        if r.status_code == 200:
+            # find product links: detail.zol.com.cn/tv/indexNNN.shtml or .../NNN.shtml
+            links = []
+            for m in re.finditer(r'href="(https?://detail\\.zol\\.com\\.cn/(?:tv/)?index\\d+\\.shtml)"[^>]*>(.*?)</a>', r.text, re.S):
+                u, txt = m.group(1), clean_text(re.sub(r"<[^>]+>", " ", m.group(2)))[:80]
+                if u not in [x[0] for x in links]:
+                    links.append((u, txt))
+            lines.append("LINKS: " + " | ".join(f"{u} [{t}]" for u, t in links[:8]) if links else "NO LINKS FOUND")
+            picked = 0
+            for u, t in links:
+                if picked >= npages:
+                    break
+                if tokens and not token_ok([(t, u, "")], tokens):
+                    continue
+                picked += 1
+                try:
+                    rr = http_get(u)
+                    lines.append(f"--- PRODUCT {picked} {u} http={rr.status_code} len={len(rr.content)} ---")
+                    if rr.status_code == 200:
+                        lines.append(strip_html(rr.text)[:keep])
+                except Exception as e:
+                    lines.append(f"product err {e}")
+                time.sleep(1)
+            if picked == 0:
+                lines.append("token-filtered: nothing picked; raw first links above")
     except Exception as e:
-        lines.append(f"fallback err {e}")
-    return "\n".join(lines) + "\n"
+        lines.append(f"ERR {type(e).__name__}: {e}")
+    return "\\n".join(lines) + "\\n"
 
 
 def do_page(note, url, keep=12000):
@@ -167,13 +195,12 @@ def do_page(note, url, keep=12000):
         r = http_get(url)
         lines.append(f"HTTP {r.status_code} len={len(r.content)} final={r.url}")
         if r.status_code == 200:
-            txt = strip_html(r.text)
             lines.append("TEXT-START")
-            lines.append(txt[:keep])
+            lines.append(strip_html(r.text)[:keep])
             lines.append("TEXT-END")
     except Exception as e:
         lines.append(f"ERR {type(e).__name__}: {e}")
-    return "\n".join(lines) + "\n"
+    return "\\n".join(lines) + "\\n"
 
 
 def gh_api(method, path, token, payload=None):
@@ -202,23 +229,25 @@ def main():
         targets = json.load(f)
     parts = []
     for i, t in enumerate(targets, 1):
-        note, mode = t["note"], t.get("mode", "serp")
+        note, mode, tokens = t["note"], t.get("mode", "serp"), t.get("tokens", [])
         try:
-            if mode == "page":
+            if mode == "zolauto":
+                part = do_zolauto(note, t["query"], tokens, npages=t.get("npages", 2), keep=t.get("keep", 9000))
+            elif mode == "page":
                 part = do_page(note, t["url"], keep=t.get("keep", 12000))
             else:
-                part = do_serp(note, t["query"])
+                part = do_serp(note, t["query"], tokens)
         except Exception as e:
-            part = f"===== {note} =====\nERR {type(e).__name__}: {e}\n"
+            part = f"===== {note} =====\\nERR {type(e).__name__}: {e}\\n"
         parts.append(part)
         print(f"{i:02d} {note} done", flush=True)
         time.sleep(1.0)
-    full = "\n".join(parts)
+    full = "\\n".join(parts)
     os.makedirs("data", exist_ok=True)
     with open("data/digest.txt", "w", encoding="utf-8") as f:
         f.write(full)
     if token:
-        publish(token, full, f"digest v6 {time.strftime('%m-%d %H:%M UTC', time.gmtime())}")
+        publish(token, full, f"digest v7 {time.strftime('%m-%d %H:%M UTC', time.gmtime())}")
     print("DONE", flush=True)
 
 
